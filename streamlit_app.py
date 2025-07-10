@@ -4,8 +4,6 @@ import numpy as np
 import cv2
 from PIL import Image
 import io
-import base64
-import os
 
 # Load models
 @st.cache_resource
@@ -33,7 +31,6 @@ def generate_gradcam(img_array, original_image):
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
         loss = predictions[:, 0]
-
     grads = tape.gradient(loss, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
     conv_outputs = conv_outputs[0]
@@ -56,17 +53,15 @@ def preprocess_image(image_bytes):
     processed = np.expand_dims(image_array, axis=0)
     return image, processed
 
-# UI
+# Title and file upload
 st.title("🧠 Brain Tumor Detection with Grad-CAM")
 uploaded_file = st.file_uploader("Upload an MRI Image", type=["jpg", "png", "jpeg"])
 
 if uploaded_file:
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
-
     img_bytes = uploaded_file.read()
     original_img, processed_img = preprocess_image(img_bytes)
 
-    # Predict
+    # Predict using TFLite
     interpreter.set_tensor(input_details[0]['index'], processed_img)
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]['index'])
@@ -74,12 +69,41 @@ if uploaded_file:
     threshold = 0.42
     result = 'Tumor' if prediction_score > threshold else 'No Tumor'
 
-    # Grad-CAM
-    processed_for_h5 = (np.array(original_img.resize((width, height))) / 127.5) - 1.0
-    processed_for_h5 = np.expand_dims(processed_for_h5, axis=0).astype(np.float32)
-    gradcam_img = generate_gradcam(processed_for_h5, original_img)
-
+    # Prediction display
     st.markdown(f"### 🧪 Prediction: `{result}`")
     st.markdown(f"### 📊 Confidence: `{round(prediction_score * 100, 2)}%`")
-    st.markdown("### 🔍 Explanation (Grad-CAM):")
-    st.image(gradcam_img, caption="Grad-CAM Result", use_column_width=True)
+
+    if result == "Tumor":
+        # Grad-CAM generation
+        processed_for_h5 = (np.array(original_img.resize((width, height))) / 127.5) - 1.0
+        processed_for_h5 = np.expand_dims(processed_for_h5, axis=0).astype(np.float32)
+        gradcam_img = generate_gradcam(processed_for_h5, original_img)
+
+        # Show both images side-by-side
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(original_img, caption="Original MRI", use_container_width=True)
+        with col2:
+            st.image(gradcam_img, caption="Grad-CAM: Highlighted tumor regions", use_container_width=True)
+
+    else:
+        st.image(original_img, caption="Uploaded Image", use_container_width=True)
+        st.info("No tumor detected. Grad-CAM explanation is not required.")
+
+# Sidebar glossary
+with st.sidebar.expander("📖 Glossary (Click to Expand)"):
+    st.markdown("### 🧠 Medical Terms")
+    st.markdown("- **MRI (Magnetic Resonance Imaging):** Imaging technique used to visualize internal structures of the body, especially brain tissues.")
+    st.markdown("- **Tumor:** An abnormal growth of tissue. It can be benign (non-cancerous) or malignant (cancerous).")
+    st.markdown("- **Glioma:** A common type of brain tumor arising from glial cells.")
+    st.markdown("- **Meningioma:** A tumor that arises from the meninges, the protective membranes around the brain and spinal cord.")
+    st.markdown("- **Pituitary Tumor:** A tumor in the pituitary gland, which controls various hormones.")
+
+    st.markdown("### 🧪 AI Terms")
+    st.markdown("- **Grad-CAM (Gradient-weighted Class Activation Mapping):** A technique to highlight important regions in the image influencing the model's decision.")
+    st.markdown("- **TensorFlow Lite (TFLite):** A lightweight version of TensorFlow optimized for mobile and edge devices.")
+    st.markdown("- **.h5 Model:** A format used by Keras to save full models, including weights and architecture.")
+    st.markdown("- **Confidence Score:** Indicates how sure the model is about its prediction, expressed as a percentage.")
+    st.markdown("- **Threshold:** The decision boundary to classify an image as ‘Tumor’ or ‘No Tumor’.")
+
+    
