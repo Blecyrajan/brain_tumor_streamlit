@@ -4,6 +4,75 @@ import numpy as np
 import cv2
 from PIL import Image
 import io
+import sqlite3
+import hashlib
+from database import create_tables, get_connection
+
+create_tables()
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def register_user(username, password):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO users (username, password) VALUES (?, ?)",
+            (username, hash_password(password))
+        )
+        conn.commit()
+        return True
+    except:
+        return False
+
+def login_user(username, password):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, username FROM users WHERE username=? AND password=?",
+        (username, hash_password(password))
+    )
+    return cur.fetchone()
+
+st.sidebar.title("User Authentication")
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+if st.session_state.user_id is None:
+    option = st.sidebar.selectbox("Choose", ["Login", "Register"])
+
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+
+    if option == "Register":
+        if st.sidebar.button("Register"):
+            if register_user(username, password):
+                st.success("Registered successfully!")
+            else:
+                st.error("Username already exists")
+
+    if option == "Login":
+        if st.sidebar.button("Login"):
+            user = login_user(username, password)
+            if user:
+                st.session_state.user_id = user[0]
+                st.session_state.username = user[1]
+                st.success("Logged in successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+
+    st.stop()
+
+st.sidebar.success(f"👤 Logged in as {st.session_state.username}")
+
+# Logout button
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.user_id = None
+    st.rerun()
 
 # Load models
 @st.cache_resource
@@ -69,6 +138,14 @@ if uploaded_file:
     threshold = 0.42
     result = 'Tumor' if prediction_score > threshold else 'No Tumor'
 
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO history (user_id, result, confidence) VALUES (?, ?, ?)",
+        (st.session_state.user_id, result, prediction_score)
+    )
+    conn.commit()
+
     # Prediction display
     st.markdown(f"### 🧪 Prediction: `{result}`")
     st.markdown(f"### 📊 Confidence: `{round(prediction_score * 100, 2)}%`")
@@ -90,6 +167,24 @@ if uploaded_file:
         st.image(original_img, caption="Uploaded Image", use_container_width=True)
         st.info("No tumor detected. Grad-CAM explanation is not required.")
 
+#Prediction history per user
+st.subheader("📜 Your Prediction History")
+
+conn = get_connection()
+cur = conn.cursor()
+cur.execute(
+    "SELECT result, confidence, timestamp FROM history WHERE user_id=? ORDER BY timestamp DESC",
+    (st.session_state.user_id,)
+)
+
+rows = cur.fetchall()
+
+if rows:
+    st.table(rows)
+else:
+    st.info("No prediction history yet.")
+
+
 # Sidebar glossary
 with st.sidebar.expander("📖 Glossary (Click to Expand)"):
     st.markdown("### 🧠 Medical Terms")
@@ -105,5 +200,6 @@ with st.sidebar.expander("📖 Glossary (Click to Expand)"):
     st.markdown("- **.h5 Model:** A format used by Keras to save full models, including weights and architecture.")
     st.markdown("- **Confidence Score:** Indicates how sure the model is about its prediction, expressed as a percentage.")
     st.markdown("- **Threshold:** The decision boundary to classify an image as ‘Tumor’ or ‘No Tumor’.")
+
 
     
